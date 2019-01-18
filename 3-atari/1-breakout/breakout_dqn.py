@@ -1,12 +1,13 @@
 import gym
 import random
+import time
 import numpy as np
 import tensorflow as tf
 from collections import deque
 from skimage.color import rgb2gray
 from skimage.transform import resize
 from keras.models import Sequential
-from keras.optimizers import RMSprop
+from keras.optimizers import RMSprop #why not Adam or a variation?  says RMSprop good for RNN, because of temporal?
 from keras.layers import Dense, Flatten
 from keras.layers.convolutional import Conv2D
 from keras import backend as K
@@ -14,12 +15,12 @@ from keras import backend as K
 EPISODES = 50000
 
 
-class DQNAgent:
+class DQNAgent: #action size is 3 when instantiated 
     def __init__(self, action_size):
         self.render = False
-        self.load_model = False
+        self.load_model = True
         # environment settings
-        self.state_size = (84, 84, 4)
+        self.state_size = (84, 84, 4) #84 * 84 pixels and 4 frames
         self.action_size = action_size
         # parameters about epsilon
         self.epsilon = 1.
@@ -29,10 +30,10 @@ class DQNAgent:
                                   / self.exploration_steps
         # parameters about training
         self.batch_size = 32
-        self.train_start = 50000
+        self.train_start = 50000 #start train when deque has 50,000 experiences
         self.update_target_rate = 10000
         self.discount_factor = 0.99
-        self.memory = deque(maxlen=400000)
+        self.memory = deque(maxlen=400000) #apparently deque is slow
         self.no_op_steps = 30
         # build model
         self.model = self.build_model()
@@ -44,7 +45,8 @@ class DQNAgent:
         self.sess = tf.InteractiveSession()
         K.set_session(self.sess)
 
-        self.avg_q_max, self.avg_loss = 0, 0
+        self.avg_q_max = 0
+        self.avg_loss = 0
         self.summary_placeholders, self.update_ops, self.summary_op = \
             self.setup_summary()
         self.summary_writer = tf.summary.FileWriter(
@@ -55,24 +57,29 @@ class DQNAgent:
             self.model.load_weights("./save_model/breakout_dqn.h5")
 
     # if the error is in [-1, 1], then the cost is quadratic to the error
-    # But outside the interval, the cost is linear to the error
+    # But outside the interval, the cost is linear to the error, ie. something about Huber Loss
+    #K is backend imported as K
     def optimizer(self):
         a = K.placeholder(shape=(None,), dtype='int32')
         y = K.placeholder(shape=(None,), dtype='float32')
 
-        py_x = self.model.output
+        py_x = self.model.output #of the model which is the Q value of each action? 
 
         a_one_hot = K.one_hot(a, self.action_size)
-        q_value = K.sum(py_x * a_one_hot, axis=1)
-        error = K.abs(y - q_value)
+        q_value = K.sum(py_x * a_one_hot, axis=1) #one hot encoding Q value of action 
+        error = K.abs(y - q_value) #looks like MAE for Huber Loss, caring about all losses equally
 
-        quadratic_part = K.clip(error, 0.0, 1.0)
+        quadratic_part = K.clip(error, 0.0, 1.0) 
         linear_part = error - quadratic_part
-        loss = K.mean(0.5 * K.square(quadratic_part) + linear_part)
+        loss = K.mean(0.5 * K.square(quadratic_part) + linear_part) #the MSE for low error values
 
-        optimizer = RMSprop(lr=0.00025, epsilon=0.01)
+        optimizer = RMSprop(lr=0.00025, epsilon=0.01) #
+        #get_updates is tf (loss, param)
         updates = optimizer.get_updates(self.model.trainable_weights, [], loss)
-        train = K.function([self.model.input, a, y], [loss], updates=updates)
+
+        #instantiate Keras fxn but args are(list placholder tensors, list output tensor, list update ops)
+        #why output tensor is loss?
+        train = K.function([self.model.input, a, y], [loss], updates=updates) #GD step?
 
         return train
 
@@ -91,16 +98,18 @@ class DQNAgent:
         return model
 
     # after some time interval update the target model to be same with model
+    #donkey carrot
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
 
     # get action from model using epsilon-greedy policy
+    #history seems to be the temporal 4 frames
     def get_action(self, history):
-        history = np.float32(history / 255.0)
+        history = np.float32(history / 255.0)#RGB? history looks to be an array of images which are arrays
         if np.random.rand() <= self.epsilon:
-            return random.randrange(self.action_size)
+            return random.randrange(self.action_size) #random action
         else:
-            q_value = self.model.predict(history)
+            q_value = self.model.predict(history) #greedy
             return np.argmax(q_value[0])
 
     # save sample <s,a,r,s'> to the replay memory
@@ -111,19 +120,25 @@ class DQNAgent:
     def train_replay(self):
         if len(self.memory) < self.train_start:
             return
-        if self.epsilon > self.epsilon_end:
+        ##########again start epsilon decay after memory filled
+        if (self.epsilon > self.epsilon_end) and (len(self.memory) >= self.train_start):
             self.epsilon -= self.epsilon_decay_step
-
+        ####################old version    
+        #if self.epsilon > self.epsilon_end:
+        #    self.epsilon -= self.epsilon_decay_step
+        #2d array mini_batch being filled with memory    
         mini_batch = random.sample(self.memory, self.batch_size)
-
+        #clear out the screens in history
         history = np.zeros((self.batch_size, self.state_size[0],
                             self.state_size[1], self.state_size[2]))
+        #clear out the screens in next_history
         next_history = np.zeros((self.batch_size, self.state_size[0],
                                  self.state_size[1], self.state_size[2]))
+        #clear out target
         target = np.zeros((self.batch_size,))
         action, reward, dead = [], [], []
 
-        for i in range(self.batch_size):
+        for i in range(self.batch_size): #32 iterations
             history[i] = np.float32(mini_batch[i][0] / 255.)
             next_history[i] = np.float32(mini_batch[i][3] / 255.)
             action.append(mini_batch[i][1])
@@ -132,12 +147,12 @@ class DQNAgent:
 
         target_value = self.target_model.predict(next_history)
 
-        # like Q Learning, get maximum Q value at s'
+        # like Q Learning, get maximum Q value at s', is this Q'?
         # But from target model
         for i in range(self.batch_size):
-            if dead[i]:
+            if dead[i]: 
                 target[i] = reward[i]
-            else:
+            else: #still playing so get Q'?
                 target[i] = reward[i] + self.discount_factor * \
                                         np.amax(target_value[i])
 
@@ -169,11 +184,11 @@ class DQNAgent:
         return summary_placeholders, update_ops, summary_op
 
 
-# 210*160*3(color) --> 84*84(mono)
+# 210*160*3(color) --> 84*84(mono) is the resized shape of array
 # float --> integer (to reduce the size of replay memory)
+
 def pre_processing(observe):
-    processed_observe = np.uint8(
-        resize(rgb2gray(observe), (84, 84), mode='constant') * 255)
+    processed_observe = np.uint8(resize(rgb2gray(observe), (84, 84), mode='constant') * 255) #255?
     return processed_observe
 
 
@@ -206,6 +221,7 @@ if __name__ == "__main__":
         while not done:
             if agent.render:
                 env.render()
+                time.sleep(0.01)
             global_step += 1
             step += 1
 
