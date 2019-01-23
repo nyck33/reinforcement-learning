@@ -21,7 +21,7 @@ class A2CAgent:
         self.value_size = 1
 
         # These are hyper parameters for the Policy Gradient
-        self.discount_factor = 0.99
+        self.discount_factor = 0.99 #discount rewards?  Monte Carlo?
         self.actor_lr = 0.001
         self.critic_lr = 0.005
 
@@ -103,8 +103,8 @@ if __name__ == "__main__":
         while not done:
             if agent.render:
                 env.render()
-
-            action = agent.get_action(state)
+            #
+            action = agent.get_action(state)#actor
             next_state, reward, done, info = env.step(action)
             next_state = np.reshape(next_state, [1, state_size])
             # if an action make the episode end, then gives penalty of -100

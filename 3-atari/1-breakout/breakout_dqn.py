@@ -63,10 +63,10 @@ class DQNAgent: #action size is 3 when instantiated
         a = K.placeholder(shape=(None,), dtype='int32')
         y = K.placeholder(shape=(None,), dtype='float32')
 
-        py_x = self.model.output #of the model which is the Q value of each action? 
+        py_x = self.model.output #output is the Q value of each action 
 
         a_one_hot = K.one_hot(a, self.action_size)
-        q_value = K.sum(py_x * a_one_hot, axis=1) #one hot encoding Q value of action 
+        q_value = K.sum(py_x * a_one_hot, axis=1) #one hot encoding Q value of actions 
         error = K.abs(y - q_value) #looks like MAE for Huber Loss, caring about all losses equally
 
         quadratic_part = K.clip(error, 0.0, 1.0) 
